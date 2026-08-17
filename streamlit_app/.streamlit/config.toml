@@ -1,0 +1,18 @@
+# Дизайн-тема robo-buh: спокойный финтех, светлая основа, глубокий синий бренд.
+# Семантические цвета (доход/предупреждение/долг) — в assets/styles.css.
+
+[theme]
+base = "light"
+primaryColor = "#1E40AF"            # глубокий синий — действия, активные элементы
+backgroundColor = "#F7F8FA"         # холодный светло-серый фон приложения
+secondaryBackgroundColor = "#FFFFFF" # карточки, сайдбар
+textColor = "#0F172A"               # почти-чёрный slate
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+maxUploadSize = 50                  # выписки: PDF/XLSX до 50 МБ
+
+[browser]
+gatherUsageStats = false

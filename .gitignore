@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Секреты и окружение — никогда не коммитить
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+keypair.json
+device.json
+vault/
+
+# Данные и артефакты
+uploads/
+data/
+logs/
+*.log
+.DS_Store
+
+# XSD/WSDL из закрытых паспортов Smart Bridge (проверить лицензию до коммита)
+specs/private/

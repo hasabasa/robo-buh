@@ -1,0 +1,75 @@
+name: robobuh
+
+services:
+  backend:
+    build:
+      context: ../backend
+    container_name: robobuh_backend
+    env_file: ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_URL=redis://redis:6379/0
+      - NCANODE_URL=http://ncanode:14579
+    volumes:
+      - ../backend/app:/app/app:rw          # код подхватывается без пересборки
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: ../streamlit_app
+    container_name: robobuh_streamlit
+    env_file: ../.env
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ../streamlit_app:/app:rw
+    depends_on:
+      - backend
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: robobuh_postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-robobuh}
+      - POSTGRES_USER=${POSTGRES_USER:-robobuh}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-robobuh}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: robobuh_redis
+    restart: unless-stopped
+
+  # Верификация ЭЦП НУЦ РК. Подписывает всегда клиент у себя (NCALayer);
+  # NCANode на сервере только проверяет CMS/XML-подписи.
+  ncanode:
+    image: malikzh/ncanode:latest
+    container_name: robobuh_ncanode
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:14579/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
