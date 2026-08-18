@@ -5,23 +5,25 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..core.database import get_pool
-from ..ingestion.service import ingest_mt940
+from ..ingestion.service import ingest_statement
 
 router = APIRouter()
 
 
-@router.post("/upload/mt940")
-async def upload_mt940(taxpayer_id: UUID = Form(...), file: UploadFile = File(...)):
-    """Загрузка выписки MT940: парсит, классифицирует по КНП, кладёт в income_ledger."""
+@router.post("/upload")
+async def upload_statement(taxpayer_id: UUID = Form(...), file: UploadFile = File(...)):
+    """Загрузка выписки (MT940 или 1CClientBankExchange): автодетект → классификация → income_ledger."""
     raw = await file.read()
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:
-        content = raw.decode("cp1251", errors="replace")  # часть РК-банков в cp1251
+        content = raw.decode("cp1251", errors="replace")  # 1С и часть РК-банков в cp1251
     try:
-        return await ingest_mt940(taxpayer_id, content)
+        return await ingest_statement(taxpayer_id, content)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(422, f"Не удалось разобрать MT940: {e}")
+        raise HTTPException(422, f"Не удалось разобрать выписку: {e}")
 
 
 @router.get("/review-queue")
