@@ -27,9 +27,12 @@ class Settings(BaseSettings):
     # deepseek-ocr — сырая транскрипция тяжёлых сканов (фолбэк/препроцесс)
     alem_ocr_model: str = "deepseek-ocr"
     alem_ocr_key: str = ""
-    # embedding — RAG-база знаний (глоссарий + НК + КНП)
-    alem_embed_model: str = "embedding"
+    # text-1024 — эмбеддинги (1024-мерн., нормализованные) для RAG-базы знаний
+    alem_embed_model: str = "text-1024"
     alem_embed_key: str = ""
+
+    # База знаний (глоссарий + НК + КНП) — путь монтируется в контейнер
+    kb_docs_path: str = "/app/docs/knowledge"
 
     app_secret_key: str = ""
     env: str = "dev"

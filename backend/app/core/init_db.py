@@ -162,6 +162,19 @@ DDL = [
         UNIQUE (taxpayer_id, kind, due_date)
     );
     """,
+    # --- RAG-база знаний: чанки глоссария/НК/КНП + эмбеддинги (text-1024, 1024-мерн.) ---
+    """
+    CREATE TABLE IF NOT EXISTS kb_chunks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        doc TEXT NOT NULL,
+        heading TEXT,
+        chunk_text TEXT NOT NULL,
+        embedding JSONB NOT NULL,        -- нормализованный вектор (косинус = скаляр)
+        content_hash TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (doc, content_hash)
+    );
+    """,
     # --- Снимки задолженности из открытого сервиса КГД ---
     """
     CREATE TABLE IF NOT EXISTS debt_snapshots (

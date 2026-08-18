@@ -93,6 +93,16 @@ class AlemClient:
             f"Последняя ошибка: {type(last_error).__name__}: {last_error}"
         )
 
+    async def embed(self, texts: list[str], *, model: str, api_key: str) -> list[list[float]]:
+        """Эмбеддинги через /v1/embeddings (модель text-1024, 1024-мерн., нормализованные)."""
+        resp = await self._client.post(
+            f"{self._providers[0].base_url}/embeddings",
+            json={"model": model, "input": texts},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        return [d["embedding"] for d in resp.json()["data"]]
+
     async def _call(
         self,
         provider: AlemProvider,

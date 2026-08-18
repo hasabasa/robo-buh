@@ -12,6 +12,7 @@ services:
       - NCANODE_URL=http://ncanode:14579
     volumes:
       - ../backend/app:/app/app:rw          # код подхватывается без пересборки
+      - ../docs:/app/docs:ro                # база знаний для RAG-индексации
       - uploads:/app/uploads
     depends_on:
       postgres:
