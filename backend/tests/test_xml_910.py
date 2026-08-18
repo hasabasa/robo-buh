@@ -25,12 +25,14 @@ def test_xml_wellformed_and_lines():
     assert lines["910.00.001"].text == "1020000"                 # доход
     assert lines["910.00.003"].text == "1020000"                 # = 001 - 002
     assert lines["910.00.004"].text == "40800"                   # ИПН 4%
-    # соцраздел присутствует и помесячный
-    assert "910.00.008" in lines                                  # ОПВ
-    opv = lines["910.00.008"]
+    # соцраздел присутствует и помесячный (семантические коды, не 910.00.0XX)
+    assert "social.opv" in lines                                  # ОПВ
+    opv = lines["social.opv"]
     months = opv.findall("m")
     assert len(months) == 6 and months[0].text == "8500"          # ОПВ 8500/мес
     assert opv.find("total").text == "51000"                      # 8500 × 6
+    # налоговые строки — реальные коды бланка (совпадают достоверно)
+    assert lines["910.00.001"].text == "1020000"
 
 
 def test_flk_passes_valid():
