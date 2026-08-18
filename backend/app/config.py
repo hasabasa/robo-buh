@@ -18,15 +18,18 @@ class Settings(BaseSettings):
     # Верификация подписей (сервер НЕ подписывает — только проверяет)
     ncanode_url: str = "http://ncanode:14579"
 
-    # Alem Plus (грант Астана Хаб) — OpenAI-совместимый шлюз.
-    # Модели: qwen3-6 (vision, thinking), deepseek-ocr (vision), alemllm, kazllm.
+    # Alem Plus (грант Астана Хаб) — OpenAI-совместимый шлюз, у КАЖДОЙ модели свой ключ.
     # Vision работает ТОЛЬКО через data:image/...;base64 (внешние URL → 403).
     alem_base_url: str = "https://llm.alem.ai/v1"
-    alem_api_key: str = ""
-    alem_ocr_model: str = "deepseek-ocr"     # OCR сканов выписок
-    alem_vision_model: str = "qwen3-6"       # структурный разбор + fallback
-    alem_text_model: str = "qwen3-6"         # классификация назначения платежа
-    alem_kz_model: str = "kazllm"            # казахскоязычные документы
+    # qwen3-6 (vision, thinking) — структурный разбор выписок + классификация назначения
+    alem_vision_model: str = "qwen3-6"
+    alem_vision_key: str = ""
+    # deepseek-ocr — сырая транскрипция тяжёлых сканов (фолбэк/препроцесс)
+    alem_ocr_model: str = "deepseek-ocr"
+    alem_ocr_key: str = ""
+    # embedding — RAG-база знаний (глоссарий + НК + КНП)
+    alem_embed_model: str = "embedding"
+    alem_embed_key: str = ""
 
     app_secret_key: str = ""
     env: str = "dev"

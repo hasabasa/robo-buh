@@ -23,12 +23,16 @@ RENDER_DPI = 200
 
 OCR_SYSTEM = (
     "Ты извлекаешь операции из банковской выписки Казахстана. Верни СТРОГО JSON-массив, "
-    "без пояснений. Каждый элемент — одна операция:\n"
+    "без пояснений, без markdown. Каждый элемент — одна операция:\n"
     '{"date":"ДД.ММ.ГГГГ", "amount":число, "direction":"credit"|"debit", '
-    '"counterparty":"наименование", "counterparty_bin_iin":"12 цифр или null", '
-    '"iik":"KZ... или null", "knp":"3 цифры или null", "purpose":"назначение платежа"}\n'
-    "direction=credit — приход (деньги пришли), debit — расход. amount всегда положительное. "
-    "Если поля нет в выписке — ставь null. Числа без пробелов-разделителей и без валюты."
+    '"counterparty":"наименование или null", "counterparty_bin_iin":"12 цифр или null", '
+    '"iik":"KZ... или null", "knp":"3 цифры или null", "purpose":"полный текст назначения"}\n'
+    "ПРАВИЛО НАПРАВЛЕНИЯ (важно!): если в строке 'Кредит'/'Приход'/'Поступление'/'+' — "
+    "это direction=\"credit\". Если 'Дебет'/'Расход'/'Списание'/'-' — direction=\"debit\". "
+    "Смотри именно на колонку кредит/дебет каждой строки, не ставь всем одно значение.\n"
+    "amount — всегда положительное число без пробелов и валюты. "
+    "purpose — перенеси ВЕСЬ текст назначения платежа строки (вместе с KNP и контрагентом). "
+    "Если поля реально нет — null."
 )
 
 OCR_USER = (
@@ -70,14 +74,19 @@ def _parse_ops(raw: str) -> list[dict]:
 
 
 async def ocr_statement_pdf(pdf_bytes: bytes, client: AlemClient) -> list[dict]:
-    """Скан-выписка PDF → список операций (сырые dict под нормализацию в income_ledger)."""
+    """Скан-выписка PDF → список операций (сырые dict под нормализацию в income_ledger).
+
+    Структурный разбор делает vision-LLM (qwen3-6): читает картинку страницы И сразу
+    возвращает JSON-массив операций. deepseek-ocr для этого не годится — он транскрибирует
+    в текст, а не в структуру; его держим для сырой транскрипции тяжёлых сканов отдельно.
+    """
     pages = render_pdf_to_png(pdf_bytes)
     logger.info("OCR выписки: %d страниц на распознавание", len(pages))
     all_ops: list[dict] = []
     for i, png in enumerate(pages):
         data_url = AlemClient.image_data_url(png, "image/png")
         resp = await client.chat(OCR_SYSTEM, OCR_USER, images=[data_url])
-        ops = _parse_ops(resp.content)
+        ops = _parse_ops(resp.content or resp.reasoning or "")
         logger.info("OCR стр. %d/%d: %d операций", i + 1, len(pages), len(ops))
         all_ops.extend(ops)
     return all_ops
