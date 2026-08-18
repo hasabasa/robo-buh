@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from .core.database import close_pool, get_pool
 from .core.init_db import init_db
-from .routers import health, signing, tax, taxpayers
+from .routers import health, income, signing, tax, taxpayers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,3 +33,4 @@ app.include_router(health.router, tags=["service"])
 app.include_router(taxpayers.router, prefix="/api/taxpayers", tags=["taxpayers"])
 app.include_router(signing.router, prefix="/api/declarations", tags=["signing"])
 app.include_router(tax.router, prefix="/api/tax", tags=["tax"])
+app.include_router(income.router, prefix="/api/income", tags=["income"])

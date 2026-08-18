@@ -85,7 +85,7 @@ DDL = [
         -- Классификация: NULL = не решено (очередь сверки), TRUE = доход, FALSE = не доход
         is_income BOOLEAN,
         confidence NUMERIC(3,2),       -- уверенность классификатора 0..1
-        classified_by TEXT CHECK (classified_by IN ('knp_rule','qwen','human') OR classified_by IS NULL),
+        classified_by TEXT CHECK (classified_by IN ('knp_rule','direction','qwen','human','unknown') OR classified_by IS NULL),
         -- Дедупликация: одна продажа может прийти чеком ОФД и зачислением банка
         dedup_group_id UUID,
         duplicate_of UUID REFERENCES income_ledger(id),
