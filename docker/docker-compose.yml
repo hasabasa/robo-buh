@@ -40,10 +40,9 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: robobuh_postgres
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-robobuh}
-      - POSTGRES_USER=${POSTGRES_USER:-robobuh}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    # env_file (а не ${}-подстановка): этот docker-compose ищет .env рядом с
+    # compose-файлом, а он в корне репо. Так POSTGRES_* приходят в контейнер напрямую.
+    env_file: ../.env
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

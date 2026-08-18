@@ -11,7 +11,7 @@ python-multipart==0.0.*
 mt-940==5.0.*
 openpyxl==3.1.*
 pdfplumber==0.11.*
-
+PyMuPDF==1.24.*
 # XML форм (генерация + XSD-валидация)
 lxml==5.*
 xmlschema==3.*
