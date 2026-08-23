@@ -36,7 +36,7 @@ DDL = [
         iin_bin CHAR(12) NOT NULL,
         name TEXT NOT NULL,
         tax_regime TEXT NOT NULL DEFAULT 'snr_simplified'
-            CHECK (tax_regime IN ('snr_simplified')),
+            CHECK (tax_regime IN ('snr_simplified', 'our')),
         oked TEXT,
         ugd_code TEXT,                 -- код органа госдоходов
         maslikhat_rate NUMERIC(4,2),   -- ставка ИПН решением маслихата (NULL = базовая 4%)
@@ -174,6 +174,46 @@ DDL = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE (doc, content_hash)
     );
+    """,
+    # --- [Продукт B: ОУР] Допускаем режим 'our' в taxpayers.tax_regime ---
+    """
+    DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
+                   WHERE table_name='taxpayers' AND constraint_name='taxpayers_tax_regime_check') THEN
+            ALTER TABLE taxpayers DROP CONSTRAINT taxpayers_tax_regime_check;
+        END IF;
+        ALTER TABLE taxpayers ADD CONSTRAINT taxpayers_tax_regime_check
+            CHECK (tax_regime IN ('snr_simplified', 'our'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+    """,
+    # --- [Продукт B: ОУР] Расширение ledger на расходную сторону и НДС ---
+    # Гарды IF NOT EXISTS — идиома проекта (без alembic). Для упрощёнки (A) поля не
+    # используются; для ОУР (B): НДС в составе операции (зачёт входного), категория
+    # расхода и вычитаемость по КПН. Направление уже есть в payment_channel (credit/debit).
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='income_ledger' AND column_name='vat_amount') THEN
+            ALTER TABLE income_ledger ADD COLUMN vat_amount NUMERIC(14,2);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='income_ledger' AND column_name='vat_rate') THEN
+            ALTER TABLE income_ledger ADD COLUMN vat_rate NUMERIC(4,2);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='income_ledger' AND column_name='expense_category') THEN
+            ALTER TABLE income_ledger ADD COLUMN expense_category TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='income_ledger' AND column_name='is_deductible') THEN
+            ALTER TABLE income_ledger ADD COLUMN is_deductible BOOLEAN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='income_ledger' AND column_name='esf_id') THEN
+            ALTER TABLE income_ledger ADD COLUMN esf_id TEXT;  -- регистрационный номер ЭСФ
+        END IF;
+    END $$;
     """,
     # --- Снимки задолженности из открытого сервиса КГД ---
     """
