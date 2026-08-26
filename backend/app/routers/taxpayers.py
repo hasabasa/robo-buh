@@ -78,15 +78,15 @@ async def get_taxpayer(taxpayer_id: UUID):
 
 
 @router.get("")
-async def list_taxpayers(user_id: UUID):
+async def list_taxpayers(user_id: UUID | None = None):
+    """Список налогоплательщиков. Без user_id — все (для прототипа-дашборда)."""
     pool = await get_pool()
+    cols = """id, kind, iin_bin, name, tax_regime, ugd_code, maslikhat_rate,
+              (kaspi_api_token IS NOT NULL) AS has_kaspi_token"""
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, kind, iin_bin, name, tax_regime, ugd_code, maslikhat_rate,
-                   (kaspi_api_token IS NOT NULL) AS has_kaspi_token
-            FROM taxpayers WHERE user_id = $1 ORDER BY created_at
-            """,
-            user_id,
-        )
+        if user_id is None:
+            rows = await conn.fetch(f"SELECT {cols} FROM taxpayers ORDER BY created_at")
+        else:
+            rows = await conn.fetch(
+                f"SELECT {cols} FROM taxpayers WHERE user_id = $1 ORDER BY created_at", user_id)
     return [dict(r) for r in rows]
