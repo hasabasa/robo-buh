@@ -16,12 +16,18 @@ from uuid import UUID
 from ..core.database import get_pool
 from .client_bank_1c import parse_1c
 from .mt940_parser import parse_mt940
+from .esf_parser import parse_esf_invoices
 
 logger = logging.getLogger(__name__)
 
 
 def _status_for(op: dict) -> str:
-    return "confirmed" if op.get("classified_by") in ("knp_rule", "direction") else "pending"
+    return "confirmed" if op.get("classified_by") in ("knp_rule", "direction", "esf") else "pending"
+
+
+def _num(v):
+    """None → None, иначе Decimal (для NUMERIC-колонок)."""
+    return None if v is None else Decimal(str(v))
 
 
 def detect_and_parse(content: str) -> tuple[str, list[dict]]:
@@ -47,8 +53,9 @@ async def _upsert_ops(taxpayer_id: UUID, ops: list[dict]) -> dict:
                     INSERT INTO income_ledger
                         (taxpayer_id, source, external_id, op_date, amount, payment_channel,
                          counterparty_name, counterparty_bin_iin, counterparty_iik, knp, purpose_text,
-                         is_income, confidence, classified_by, status, raw_payload)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                         is_income, confidence, classified_by, status, raw_payload,
+                         vat_amount, vat_rate, is_deductible, expense_category, esf_id)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
                     ON CONFLICT (taxpayer_id, source, external_id) DO UPDATE SET
                         amount = EXCLUDED.amount,
                         is_income = EXCLUDED.is_income,
@@ -56,7 +63,12 @@ async def _upsert_ops(taxpayer_id: UUID, ops: list[dict]) -> dict:
                         classified_by = EXCLUDED.classified_by,
                         status = EXCLUDED.status,
                         knp = EXCLUDED.knp,
-                        purpose_text = EXCLUDED.purpose_text
+                        purpose_text = EXCLUDED.purpose_text,
+                        vat_amount = EXCLUDED.vat_amount,
+                        vat_rate = EXCLUDED.vat_rate,
+                        is_deductible = EXCLUDED.is_deductible,
+                        expense_category = EXCLUDED.expense_category,
+                        esf_id = EXCLUDED.esf_id
                     """,
                     taxpayer_id, op["source"], op["external_id"],
                     date.fromisoformat(op["op_date"]) if op.get("op_date") else None,
@@ -66,6 +78,8 @@ async def _upsert_ops(taxpayer_id: UUID, ops: list[dict]) -> dict:
                     op.get("knp"), op.get("purpose_text"),
                     op["is_income"], op.get("confidence"), op.get("classified_by"),
                     _status_for(op), json.dumps(op, default=str),
+                    _num(op.get("vat_amount")), _num(op.get("vat_rate")),
+                    op.get("is_deductible"), op.get("expense_category"), op.get("esf_id"),
                 )
     return {
         "imported": len(ops),
@@ -87,3 +101,16 @@ async def ingest_statement(taxpayer_id: UUID, content: str) -> dict:
 async def ingest_mt940(taxpayer_id: UUID, content: str) -> dict:
     """Совместимость: разбор строго MT940."""
     return await _upsert_ops(taxpayer_id, parse_mt940(content))
+
+
+async def ingest_esf(taxpayer_id, xml: str) -> dict:
+    """Разбирает выгрузку ЭСФ по БИН налогоплательщика и складывает в income_ledger."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        tp = await conn.fetchrow("SELECT iin_bin FROM taxpayers WHERE id=$1", taxpayer_id)
+    if not tp:
+        raise ValueError("Налогоплательщик не найден")
+    ops = parse_esf_invoices(xml, tp["iin_bin"])
+    summary = await _upsert_ops(taxpayer_id, ops)
+    summary["source"] = "esf"
+    return summary

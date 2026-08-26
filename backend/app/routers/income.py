@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..core.database import get_pool
-from ..ingestion.service import ingest_statement
+from ..ingestion.service import ingest_statement, ingest_esf
 
 router = APIRouter()
 
@@ -41,3 +41,15 @@ async def review_queue(taxpayer_id: UUID):
             taxpayer_id,
         )
     return [dict(r) for r in rows]
+
+
+@router.post("/esf/upload")
+async def upload_esf(taxpayer_id: UUID = Form(...), file: UploadFile = File(...)):
+    """Загрузка выгрузки ЭСФ (invoiceContainer XML): счета → income_ledger с НДС."""
+    raw = await file.read()
+    try:
+        return await ingest_esf(taxpayer_id, raw.decode("utf-8"))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Не удалось разобрать ЭСФ: {e}")

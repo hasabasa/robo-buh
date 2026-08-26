@@ -69,7 +69,7 @@ DDL = [
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         taxpayer_id UUID NOT NULL REFERENCES taxpayers(id) ON DELETE CASCADE,
         source TEXT NOT NULL CHECK (source IN
-            ('kaspi_api','bank_mt940','bank_1c','bank_csv','bank_pdf','ofd_webkassa','manual')),
+            ('kaspi_api','bank_mt940','bank_1c','bank_csv','bank_pdf','ofd_webkassa','esf','manual')),
         external_id TEXT NOT NULL,     -- id операции в источнике (для идемпотентности)
         op_date DATE NOT NULL,
         op_datetime TIMESTAMPTZ,
@@ -85,7 +85,7 @@ DDL = [
         -- Классификация: NULL = не решено (очередь сверки), TRUE = доход, FALSE = не доход
         is_income BOOLEAN,
         confidence NUMERIC(3,2),       -- уверенность классификатора 0..1
-        classified_by TEXT CHECK (classified_by IN ('knp_rule','direction','qwen','human','unknown') OR classified_by IS NULL),
+        classified_by TEXT CHECK (classified_by IN ('knp_rule','direction','qwen','human','esf','unknown') OR classified_by IS NULL),
         -- Дедупликация: одна продажа может прийти чеком ОФД и зачислением банка
         dedup_group_id UUID,
         duplicate_of UUID REFERENCES income_ledger(id),
@@ -181,6 +181,24 @@ DDL = [
         ALTER TABLE declarations DROP CONSTRAINT IF EXISTS declarations_form_code_check;
         ALTER TABLE declarations ADD CONSTRAINT declarations_form_code_check
             CHECK (form_code IN ('910.00','200.00','300.00','100.00'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+    """,
+    # --- [Продукт B] Источник 'esf' в income_ledger ---
+    """
+    DO $$ BEGIN
+        ALTER TABLE income_ledger DROP CONSTRAINT IF EXISTS income_ledger_source_check;
+        ALTER TABLE income_ledger ADD CONSTRAINT income_ledger_source_check
+            CHECK (source IN ('kaspi_api','bank_mt940','bank_1c','bank_csv','bank_pdf','ofd_webkassa','esf','manual'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+    """,
+    # --- [Продукт B] Классификатор 'esf' в income_ledger ---
+    """
+    DO $$ BEGIN
+        ALTER TABLE income_ledger DROP CONSTRAINT IF EXISTS income_ledger_classified_by_check;
+        ALTER TABLE income_ledger ADD CONSTRAINT income_ledger_classified_by_check
+            CHECK (classified_by IN ('knp_rule','direction','qwen','human','esf','unknown') OR classified_by IS NULL);
     EXCEPTION WHEN duplicate_object THEN NULL;
     END $$;
     """,
