@@ -119,3 +119,25 @@ docker-compose -f docker/docker-compose.yml up -d --build   # только docke
 
 Детали разведки КГД — память `kgd-official-sources`. Арсенал Alem — `alem-ai-arsenal`.
 Почему Kaspi Pay не источник — `kaspi-pay-accounting-dead-end`.
+
+## ЭСФ-коннектор (Фаза B, разведано 26.08.2026 — ГОТОВО К СБОРКЕ)
+
+Источник для НДС-движка (300.00) + сверки контуров. SDK скачан и разобран (esf-sdk-2025.zip,
+189МБ, kgd.gov.kz/sites/default/files/ftpdata/ESF/): 30 WSDL, 60 XSD, SoapUI-проект с готовыми
+запросами, RSA+GOST тест-серты (пароль **TestPass123**), полная docs.
+
+- **Живой тестовый стенд:** `https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/` (HTTP 200 с
+  мака в Астане; `esf-test.kgd.gov.kz:9443` из SDK-properties — МЁРТВ, не использовать).
+  Прод: `esf.gov.kz:8443/esf-web/ws/api1/`.
+- **Сервисы:** `InvoiceService` (счета-фактуры выставл./получ. — питает 300.00),
+  `SntWebService` (СНТ), `VstoreBalanceWebService` (виртуальный склад),
+  `FnoMatchingWebService` (сверка с ФНО — киллер-контур), `SessionService` (авторизация).
+- **Авторизация:** SOAP `createSessionSigned(tin=БИН, signedAuthTicket)` + header wsse:UsernameToken
+  (login=ИИН, pass). signedAuthTicket = enveloped-XMLDSIG над
+  `<authSign><timeMark>{unix_ms}</timeMark><state>{b64 nonce}</state><iin>{ИИН}</iin></authSign>`.
+  `tin` = БИН предприятия, за которое действуешь → это МУЛЬТИТЕНАНТ (один серт за разные БИН).
+- **Ключевой нюанс:** GOST-ключи (боевые) подписываются только Kalkan/NCALayer; RSA тест-серты
+  (AUTH_RSA256_SELLER_NEW.p12) — можно в Python через `signxml` (НЕ установлен — добавить).
+  В ПРОДЕ подписывает клиент своей ЭЦП (NCALayer), бэкенд ключ не держит.
+- **Сборка:** нужен `signxml` (XMLDSIG); чистый парсер счёта (по примерам SDK) верифицируем офлайн,
+  SOAP-транспорт — вживую на test3. Артефакты в scratchpad (esf-sdk/, esf_soapui.xml, RSA-серты).
