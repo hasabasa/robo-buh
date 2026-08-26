@@ -11,6 +11,7 @@ from ..tax.penalty import calc_penalty
 from ..tax.service import compute_declaration_910
 from ..tax.xml_service import generate_910_xml
 from ..tax.vat_service import compute_vat_300
+from ..tax.payroll_service import compute_200
 
 router = APIRouter()
 
@@ -61,5 +62,15 @@ async def calculate_300(taxpayer_id: UUID, year: int = Query(..., ge=2026, le=20
     """Считает НДС форму 300.00 за квартал из income_ledger (исходящий − входящий)."""
     try:
         return await compute_vat_300(taxpayer_id, year, quarter)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/200/calculate")
+async def calculate_200(taxpayer_id: UUID, year: int = Query(..., ge=2026, le=2035),
+                        quarter: int = Query(..., ge=1, le=4)):
+    """Считает зарплатную форму 200.00 за квартал по работникам налогоплательщика."""
+    try:
+        return await compute_200(taxpayer_id, year, quarter)
     except ValueError as e:
         raise HTTPException(404, str(e))
