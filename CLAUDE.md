@@ -120,24 +120,35 @@ docker-compose -f docker/docker-compose.yml up -d --build   # только docke
 Детали разведки КГД — память `kgd-official-sources`. Арсенал Alem — `alem-ai-arsenal`.
 Почему Kaspi Pay не источник — `kaspi-pay-accounting-dead-end`.
 
-## ЭСФ-коннектор (Фаза B, разведано 26.08.2026 — ГОТОВО К СБОРКЕ)
+## ЭСФ-коннектор (Фаза B) — ПАРСЕР ГОТОВ, ТРАНСПОРТ ДОКАЗАН ВЖИВУЮ 26.08.2026
 
-Источник для НДС-движка (300.00) + сверки контуров. SDK скачан и разобран (esf-sdk-2025.zip,
-189МБ, kgd.gov.kz/sites/default/files/ftpdata/ESF/): 30 WSDL, 60 XSD, SoapUI-проект с готовыми
-запросами, RSA+GOST тест-серты (пароль **TestPass123**), полная docs.
+Источник для НДС-движка (300.00) + сверки контуров. SDK разобран (esf-sdk, 189МБ,
+kgd.gov.kz/sites/default/files/ftpdata/ESF/): 30 WSDL, 60 XSD, SoapUI-проект, RSA+GOST тест-серты.
 
-- **Живой тестовый стенд:** `https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/` (HTTP 200 с
-  мака в Астане; `esf-test.kgd.gov.kz:9443` из SDK-properties — МЁРТВ, не использовать).
-  Прод: `esf.gov.kz:8443/esf-web/ws/api1/`.
-- **Сервисы:** `InvoiceService` (счета-фактуры выставл./получ. — питает 300.00),
-  `SntWebService` (СНТ), `VstoreBalanceWebService` (виртуальный склад),
-  `FnoMatchingWebService` (сверка с ФНО — киллер-контур), `SessionService` (авторизация).
-- **Авторизация:** SOAP `createSessionSigned(tin=БИН, signedAuthTicket)` + header wsse:UsernameToken
-  (login=ИИН, pass). signedAuthTicket = enveloped-XMLDSIG над
-  `<authSign><timeMark>{unix_ms}</timeMark><state>{b64 nonce}</state><iin>{ИИН}</iin></authSign>`.
-  `tin` = БИН предприятия, за которое действуешь → это МУЛЬТИТЕНАНТ (один серт за разные БИН).
-- **Ключевой нюанс:** GOST-ключи (боевые) подписываются только Kalkan/NCALayer; RSA тест-серты
-  (AUTH_RSA256_SELLER_NEW.p12) — можно в Python через `signxml` (НЕ установлен — добавить).
-  В ПРОДЕ подписывает клиент своей ЭЦП (NCALayer), бэкенд ключ не держит.
-- **Сборка:** нужен `signxml` (XMLDSIG); чистый парсер счёта (по примерам SDK) верифицируем офлайн,
-  SOAP-транспорт — вживую на test3. Артефакты в scratchpad (esf-sdk/, esf_soapui.xml, RSA-серты).
+**Парсер счёта — ГОТОВ** (`ingestion/esf_parser.py`): invoiceContainer XML → ledger с НДС,
+направление по БИН владельца (продавец→реализация/исходящий, покупатель→закупка/входящий),
+namespace-agnostic (v1/v2). `POST /api/income/esf/upload`. E2E: ЭСФ → ledger → 300.00. Тесты зелёные.
+
+**SOAP-транспорт (`esf/soap.py`) — доказан на живом стенде test3:**
+- База (ВСЕ сервисы, включая Version): `https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/`.
+  Прод: `esf.gov.kz:8443/esf-web/ws/api1/`. `esf-test.kgd.gov.kz:9443` (из SDK-properties) — МЁРТВ.
+- **VersionService жив:** элемент запроса `esfVersionRequest` (НЕ getEsfVersion…), SOAPAction пустой
+  → вернул `<version>InvoiceV2</version>`. Это версия под наш парсер.
+- **Цепочка входа (сверено вживую):** `AuthService/createAuthTicket(iin)` → сервер сам отдаёт
+  `authTicketXml` со своими `timeMark`+`state` → клиент подписывает enveloped-XMLDSIG внутри
+  `<authSign>` → `SessionService/createSessionSigned(tin=БИН, businessProfileType, signedAuthTicket,
+  sourceType)` → sessionId. `tin`=БИН → МУЛЬТИТЕНАНТ (один серт за разные БИН). Тикет уходит
+  сырым XML в `<signedAuthTicket>` (экранированным).
+- **Подпись:** RSA-SHA256, enveloped, c14n `REC-xml-c14n-20010315#WithComments` (как в SDK). В Python
+  через `signxml`+`cryptography` (добавлены в requirements). В ПРОДЕ подписывает клиент своей ЭЦП
+  (NCALayer, GOST) — бэкенд ключ не держит; этот путь только для тест-стенда с RSA-сертом.
+- **⚠️ Тест-серты SDK ПРОСРОЧЕНЫ (истекли 2019).** createSessionSigned доходит до валидации и
+  стенд отвечает `A security error was encountered when verifying the message` — это из-за
+  истёкшего серта, а НЕ формы подписи (транспорт+подпись верны, самопроверка проходит).
+  Для живой сессии нужен действующий серт. Пин тест-сертов = **`Qwerty12`** (не TestPass123;
+  тот в properties, но к p12 не подходит — верное значение из свойства SoapUI `certificatePin`).
+  Серт SELLER: БИН 123456789021 / ИИН 123456789011. p12 — legacy-формат (OpenSSL3 CLI требует
+  `-legacy`; `cryptography`==50 грузит их штатно).
+- **Не сделано:** чтение счетов из InvoiceService (нужна живая сессия = действующий серт; парсер
+  готов принять результат). Не долбить гос-стенд повторно без валидного серта.
+- Артефакты в scratchpad: esf-sdk.zip, esf_soapui.xml, session.wsdl, p12/ (тест-серты), InvoiceV2.xsd.
