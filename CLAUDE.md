@@ -120,35 +120,42 @@ docker-compose -f docker/docker-compose.yml up -d --build   # только docke
 Детали разведки КГД — память `kgd-official-sources`. Арсенал Alem — `alem-ai-arsenal`.
 Почему Kaspi Pay не источник — `kaspi-pay-accounting-dead-end`.
 
-## ЭСФ-коннектор (Фаза B) — ПАРСЕР ГОТОВ, ТРАНСПОРТ ДОКАЗАН ВЖИВУЮ 26.08.2026
+## ЭСФ-коннектор (Фаза B) — ПОЛНОСТЬЮ ДОКАЗАН НА ПРОДЕ 26.08.2026
 
 Источник для НДС-движка (300.00) + сверки контуров. SDK разобран (esf-sdk, 189МБ,
 kgd.gov.kz/sites/default/files/ftpdata/ESF/): 30 WSDL, 60 XSD, SoapUI-проект, RSA+GOST тест-серты.
 
 **Парсер счёта — ГОТОВ** (`ingestion/esf_parser.py`): invoiceContainer XML → ledger с НДС,
 направление по БИН владельца (продавец→реализация/исходящий, покупатель→закупка/входящий),
-namespace-agnostic (v1/v2). `POST /api/income/esf/upload`. E2E: ЭСФ → ledger → 300.00. Тесты зелёные.
+namespace-agnostic (v1/v2). `POST /api/income/esf/upload`. E2E: ЭСФ → ledger → 300.00.
 
-**SOAP-транспорт (`esf/soap.py`) — доказан на живом стенде test3:**
-- База (ВСЕ сервисы, включая Version): `https://test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/`.
-  Прод: `esf.gov.kz:8443/esf-web/ws/api1/`. `esf-test.kgd.gov.kz:9443` (из SDK-properties) — МЁРТВ.
-- **VersionService жив:** элемент запроса `esfVersionRequest` (НЕ getEsfVersion…), SOAPAction пустой
-  → вернул `<version>InvoiceV2</version>`. Это версия под наш парсер.
-- **Цепочка входа (сверено вживую):** `AuthService/createAuthTicket(iin)` → сервер сам отдаёт
-  `authTicketXml` со своими `timeMark`+`state` → клиент подписывает enveloped-XMLDSIG внутри
-  `<authSign>` → `SessionService/createSessionSigned(tin=БИН, businessProfileType, signedAuthTicket,
-  sourceType)` → sessionId. `tin`=БИН → МУЛЬТИТЕНАНТ (один серт за разные БИН). Тикет уходит
-  сырым XML в `<signedAuthTicket>` (экранированным).
-- **Подпись:** RSA-SHA256, enveloped, c14n `REC-xml-c14n-20010315#WithComments` (как в SDK). В Python
-  через `signxml`+`cryptography` (добавлены в requirements). В ПРОДЕ подписывает клиент своей ЭЦП
-  (NCALayer, GOST) — бэкенд ключ не держит; этот путь только для тест-стенда с RSA-сертом.
-- **⚠️ Тест-серты SDK ПРОСРОЧЕНЫ (истекли 2019).** createSessionSigned доходит до валидации и
-  стенд отвечает `A security error was encountered when verifying the message` — это из-за
-  истёкшего серта, а НЕ формы подписи (транспорт+подпись верны, самопроверка проходит).
-  Для живой сессии нужен действующий серт. Пин тест-сертов = **`Qwerty12`** (не TestPass123;
-  тот в properties, но к p12 не подходит — верное значение из свойства SoapUI `certificatePin`).
-  Серт SELLER: БИН 123456789021 / ИИН 123456789011. p12 — legacy-формат (OpenSSL3 CLI требует
-  `-legacy`; `cryptography`==50 грузит их штатно).
-- **Не сделано:** чтение счетов из InvoiceService (нужна живая сессия = действующий серт; парсер
-  готов принять результат). Не долбить гос-стенд повторно без валидного серта.
-- Артефакты в scratchpad: esf-sdk.zip, esf_soapui.xml, session.wsdl, p12/ (тест-серты), InvoiceV2.xsd.
+**SOAP-транспорт (`esf/soap.py`) — весь флоу отработал вживую на esf.gov.kz (прод):**
+- База ВСЕХ сервисов (вкл. Version): `esf.gov.kz:8443/esf-web/ws/api1/` (прод),
+  `test3.esf.kgd.gov.kz:8443/esf-web/ws/api1/` (тест). `esf-test.kgd.gov.kz:9443` — МЁРТВ.
+- **Version:** элемент `esfVersionRequest` (НЕ getEsfVersion…), пустой SOAPAction → `InvoiceV2`.
+- **Вход (доказан на проде):** `AuthService/createAuthTicket(iin)` → сервер отдаёт `authTicketXml`
+  (свои `timeMark`+`state`) → клиент подписывает enveloped-XMLDSIG внутри `<authSign>` →
+  `SessionService/createSessionSigned` → sessionId вида `<hex>-<БИН>--ADMIN_ENTERPRISE`.
+  `tin`=БИН → МУЛЬТИТЕНАНТ. Подписанный тикет — сырым XML в `<signedAuthTicket>` (экранирован).
+- **❗ createSessionSigned И closeSession требуют `wsse:Security/UsernameToken`** в SOAP-Header
+  (`mustUnderstand=1`): `Username`=ИИН, `Password`=пароль **КАБИНЕТА ЭСФ** (esf.gov.kz), НЕ PIN ключа
+  и НЕ пароль p12. Без него — `A security error was encountered when verifying the message`.
+  С неверным паролем в тикете (протухшим) — `SIGNATURE_INVALID_FORMAT`. Аккаунт-пароль задаётся
+  при регистрации в ЭСФ; вход в кабинет по ЭЦП его не отменяет.
+- **queryInvoice / queryInvoiceById — БЕЗ заголовка** (сессия уже в sessionId). Порядок элементов
+  criteria строгий по XSD: `direction, dateFrom, dateTo, asc, pageNum` (иначе `cvc-complex-type`).
+  direction: `OUTBOUND` (выданные=реализация) / `INBOUND` (полученные=закупки). **Лимит: ≤1 квартала
+  на запрос** («Можно получить список СФ за период не более 1 квартала») → бить период поквартально.
+  Ответ: `rsCount` + `invoiceInfoList`; полные счета — `queryInvoiceById(idList)` → парсер.
+- **Одна сессия на пользователя:** повторный createSessionSigned → `User already has opened session`.
+  Закрывать `closeSession` (status CLOSED). ESF-сессия живёт ~20+ мин.
+- **Подпись:** прод — клиент через **NCALayer** (`wss://127.0.0.1:13579`, commonUtils.signXml,
+  ключ AUTHENTICATION, GOST-512, enveloped, c14n `#WithComments`) — ключ и его пароль у клиента,
+  бэкенд не держит. `open_session(tin, iin, account_password, sign_fn)` — sign_fn инъектируется.
+  Тесты — RSA тест-серт SDK через `signxml` (пин **`Qwerty12`**; p12 legacy, `cryptography`==50 грузит).
+- **⚠️ ТОО CS (оператор) — НЕ плательщик НДС, ЭСФ у него 0** во всех кварталах 2024–2026 (проверено
+  вживую, обе стороны). Для валидации 300.00 на реальных данных нужен НДС-клиент. Обороты ТОО CS
+  шли банком, не через ЭСФ. Оператор-реквизиты: ИИН 040331550432, БИН 260440029440.
+- **Не доделано (нужен НДС-клиент с реальными ЭСФ):** live-разбор `queryInvoiceById`→invoiceContainer
+  через парсер (код готов, не на чем проверить). Host-раннер: `scratchpad/esf_prod_read.py` (+venv
+  `esfvenv` с websocket-client). Пароль кабинета в git/scratchpad НЕ хранится — затёрт после прогона.

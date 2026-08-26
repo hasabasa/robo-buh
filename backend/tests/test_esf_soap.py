@@ -71,3 +71,18 @@ def test_sign_ticket_wrong_pin_fails():
     _make_p12(p12, "Qwerty12")
     with pytest.raises(Exception):
         soap.sign_auth_ticket(soap.build_local_auth_ticket("123456789011"), p12, "wrongpin")
+
+
+def test_wss_header_carries_iin_and_password():
+    h = soap._wss_header("040331550432", "p@ss<&>")
+    assert "<wsse:Username>040331550432</wsse:Username>" in h
+    assert "PasswordText" in h
+    assert "p@ss&lt;&amp;&gt;" in h  # пароль экранирован
+
+
+def test_query_criteria_order_matches_xsd():
+    # порядок direction→dateFrom→dateTo→asc→pageNum обязателен (иначе cvc-complex-type)
+    import inspect
+    src = inspect.getsource(soap.query_invoices)
+    order = [src.index(t) for t in ("<direction>", "<dateFrom>", "<dateTo>", "<asc>", "<pageNum>")]
+    assert order == sorted(order)

@@ -30,6 +30,20 @@ PROD_BASE = "https://esf.gov.kz:8443/esf-web/ws/api1"
 SOAPENV = "http://schemas.xmlsoap.org/soap/envelope/"
 ESF_NS = "esf"  # targetNamespace всех сервисов ЭСФ
 C14N_INCLUSIVE = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments"  # как в примерах SDK
+WSSE = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+PWTEXT = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText"
+
+
+def _wss_header(iin: str, password: str) -> str:
+    """wsse:Security / UsernameToken (Username=ИИН, Password=пароль КАБИНЕТА ЭСФ, не PIN ключа).
+
+    Нужен ТОЛЬКО для createSessionSigned и closeSession; queryInvoice* его не требуют
+    (проверено вживую на esf.gov.kz 26.08.2026)."""
+    from xml.sax.saxutils import escape
+    return (f'<wsse:Security soapenv:mustUnderstand="1" xmlns:wsse="{WSSE}">'
+            f"<wsse:UsernameToken><wsse:Username>{iin}</wsse:Username>"
+            f'<wsse:Password Type="{PWTEXT}">{escape(password)}</wsse:Password>'
+            f"</wsse:UsernameToken></wsse:Security>")
 
 
 class EsfFault(RuntimeError):
@@ -53,11 +67,11 @@ def _envelope(body_xml: str, header_xml: str = "") -> bytes:
     ).encode("utf-8")
 
 
-def _post(base: str, service: str, body_xml: str, action: str = "",
+def _post(base: str, service: str, body_xml: str, action: str = "", header_xml: str = "",
           timeout: float = 30.0, verify_tls: bool = True) -> etree._Element:
     """POST SOAP-конверт на {base}/{service}. Возвращает корень ответа или бросает EsfFault."""
     url = f"{base}/{service}"
-    data = _envelope(body_xml)
+    data = _envelope(body_xml, header_xml)
     req = urllib.request.Request(url, data=data, headers={
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": f'"{action}"',
@@ -68,6 +82,8 @@ def _post(base: str, service: str, body_xml: str, action: str = "",
             raw = resp.read()
     except urllib.error.HTTPError as e:
         raw = e.read()  # SOAP Fault приходит с кодом 500 — тело нужно разобрать
+    if not raw.strip():
+        raise EsfFault(f"{service}: пустой ответ (проверь имя элемента/заголовок)")
     root = etree.fromstring(raw)
     fault = root.find(f".//{{{SOAPENV}}}Fault")
     if fault is not None:
@@ -146,18 +162,18 @@ def sign_auth_ticket(ticket_xml: str, p12_path: str, p12_pin: str) -> str:
     return etree.tostring(signed, encoding="unicode")
 
 
-def create_session_signed(tin: str, signed_ticket_xml: str, base: str = TEST_BASE,
-                          business_profile: str = "ADMIN_ENTERPRISE",
+def create_session_signed(tin: str, iin: str, account_password: str, signed_ticket_xml: str,
+                          base: str = TEST_BASE, business_profile: str = "ADMIN_ENTERPRISE",
                           source_type: str = "OTHER", **kw) -> EsfSession:
-    """Шаг 3: открыть сессию подписанным тикетом → sessionId."""
-    # подписанный тикет уходит строкой внутри <signedAuthTicket> (экранируем)
+    """Шаг 3: открыть сессию подписанным тикетом → sessionId. Нужен wsse:UsernameToken
+    (Username=ИИН, Password=пароль КАБИНЕТА ЭСФ) — иначе `security error verifying the message`."""
     from xml.sax.saxutils import escape
     body = (f"<esf:createSessionSignedRequest><tin>{tin}</tin>"
             f"<businessProfileType>{business_profile}</businessProfileType>"
             f"<signedAuthTicket>{escape(signed_ticket_xml)}</signedAuthTicket>"
             f"<sourceType>{source_type}</sourceType></esf:createSessionSignedRequest>")
-    root = _post(base, "SessionService", body,
-                 action="esf/SessionService/createSessionSigned", **kw)
+    root = _post(base, "SessionService", body, action="esf/SessionService/createSessionSigned",
+                 header_xml=_wss_header(iin, account_password), **kw)
     sid = _first_text(root, "sessionId")
     if not sid:
         raise EsfFault("createSessionSigned не вернул sessionId: " +
@@ -165,15 +181,47 @@ def create_session_signed(tin: str, signed_ticket_xml: str, base: str = TEST_BAS
     return EsfSession(session_id=sid, tin=tin)
 
 
-def open_session(tin: str, iin: str, p12_path: str, p12_pin: str,
-                 base: str = TEST_BASE, **kw) -> EsfSession:
-    """Полный вход: createAuthTicket → подпись → createSessionSigned."""
+def open_session(tin: str, iin: str, account_password: str, sign_fn, base: str = TEST_BASE,
+                 **kw) -> EsfSession:
+    """Полный вход: createAuthTicket → sign_fn(тикет) → createSessionSigned.
+
+    sign_fn(ticket_xml)->signed_xml инъектируется: в ПРОДЕ это подпись клиента через NCALayer
+    (ключ у клиента), в тестах — `sign_auth_ticket` с RSA-сертом SDK. Пароль кабинета отдельно
+    от подписи — он идёт в UsernameToken, а не в ключ."""
     ticket = create_auth_ticket(iin, base=base, **kw)
-    signed = sign_auth_ticket(ticket, p12_path, p12_pin)
-    return create_session_signed(tin, signed, base=base, **kw)
+    signed = sign_fn(ticket)
+    return create_session_signed(tin, iin, account_password, signed, base=base, **kw)
 
 
-def close_session(session: EsfSession, base: str = TEST_BASE, **kw) -> None:
+def query_invoices(session: EsfSession, direction: str, date_from: str, date_to: str,
+                   page: int = 1, base: str = TEST_BASE, **kw) -> list[dict]:
+    """Список счетов за период (≤1 квартала!). direction: OUTBOUND (выданные) / INBOUND (полученные).
+
+    Порядок элементов criteria строгий по XSD: direction, dateFrom, dateTo, asc, pageNum.
+    Даты в ISO 'ГГГГ-ММ-ДДTчч:мм:сс'. Заголовок UsernameToken тут НЕ нужен."""
+    crit = (f"<criteria><direction>{direction}</direction>"
+            f"<dateFrom>{date_from}</dateFrom><dateTo>{date_to}</dateTo>"
+            f"<asc>false</asc><pageNum>{page}</pageNum></criteria>")
+    root = _post(base, "InvoiceService",
+                 f"<esf:queryInvoiceRequest><sessionId>{session.session_id}</sessionId>{crit}</esf:queryInvoiceRequest>",
+                 **kw)
+    out = []
+    for it in root.xpath("//*[local-name()='invoiceInfoList']/*"):
+        out.append({etree.QName(c).localname: (c.text or "").strip() for c in it})
+    return out
+
+
+def query_invoice_by_id(session: EsfSession, ids: list[str], base: str = TEST_BASE,
+                        **kw) -> etree._Element:
+    """Полные счета по id (invoiceContainer) → скармливать parse_esf_invoices."""
+    id_xml = "".join(f"<id>{i}</id>" for i in ids)
+    return _post(base, "InvoiceService",
+                 f"<esf:queryInvoiceByIdRequest><sessionId>{session.session_id}</sessionId>"
+                 f"<idList>{id_xml}</idList></esf:queryInvoiceByIdRequest>", **kw)
+
+
+def close_session(session: EsfSession, iin: str, account_password: str,
+                  base: str = TEST_BASE, **kw) -> None:
     _post(base, "SessionService",
           f"<esf:closeSessionRequest><sessionId>{session.session_id}</sessionId></esf:closeSessionRequest>",
-          action="esf/SessionService/closeSession", **kw)
+          action="esf/SessionService/closeSession", header_xml=_wss_header(iin, account_password), **kw)
