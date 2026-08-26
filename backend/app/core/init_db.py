@@ -109,7 +109,7 @@ DDL = [
     CREATE TABLE IF NOT EXISTS declarations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         taxpayer_id UUID NOT NULL REFERENCES taxpayers(id) ON DELETE CASCADE,
-        form_code TEXT NOT NULL CHECK (form_code IN ('910.00','200.00')),
+        form_code TEXT NOT NULL CHECK (form_code IN ('910.00','200.00','300.00','100.00')),
         period_year INT NOT NULL,
         period_no INT NOT NULL,        -- 910: 1..2 (полугодие); 200: 1..4 (квартал)
         kind TEXT NOT NULL DEFAULT 'regular'
@@ -174,6 +174,15 @@ DDL = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE (doc, content_hash)
     );
+    """,
+    # --- [Продукт B] Формы 300.00/100.00 в declarations.form_code ---
+    """
+    DO $$ BEGIN
+        ALTER TABLE declarations DROP CONSTRAINT IF EXISTS declarations_form_code_check;
+        ALTER TABLE declarations ADD CONSTRAINT declarations_form_code_check
+            CHECK (form_code IN ('910.00','200.00','300.00','100.00'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
     """,
     # --- [Продукт B: ОУР] Допускаем режим 'our' в taxpayers.tax_regime ---
     """
