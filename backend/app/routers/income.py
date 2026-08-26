@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..core.database import get_pool
-from ..ingestion.service import ingest_statement, ingest_esf
+from ..ingestion.service import ingest_statement, ingest_esf, ingest_pdf_statement
 
 router = APIRouter()
 
@@ -14,6 +14,13 @@ router = APIRouter()
 async def upload_statement(taxpayer_id: UUID = Form(...), file: UploadFile = File(...)):
     """Загрузка выписки (MT940 или 1CClientBankExchange): автодетект → классификация → income_ledger."""
     raw = await file.read()
+    if raw[:5] == b"%PDF-":                        # PDF-выписка (Kaspi) — отдельный путь
+        try:
+            return await ingest_pdf_statement(taxpayer_id, raw)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(422, f"Не удалось разобрать PDF-выписку: {e}")
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:

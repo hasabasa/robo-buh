@@ -17,6 +17,7 @@ from ..core.database import get_pool
 from .client_bank_1c import parse_1c
 from .mt940_parser import parse_mt940
 from .esf_parser import parse_esf_invoices
+from .kaspi_bank_pdf import is_kaspi_bank_pdf, parse_kaspi_bank_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,18 @@ async def ingest_statement(taxpayer_id: UUID, content: str) -> dict:
 async def ingest_mt940(taxpayer_id: UUID, content: str) -> dict:
     """Совместимость: разбор строго MT940."""
     return await _upsert_ops(taxpayer_id, parse_mt940(content))
+
+
+async def ingest_pdf_statement(taxpayer_id: UUID, pdf_bytes: bytes) -> dict:
+    """Разбор PDF-выписки. Kaspi Bank — детерминированно (локально, без внешних OCR)."""
+    if is_kaspi_bank_pdf(pdf_bytes):
+        ops = parse_kaspi_bank_pdf(pdf_bytes)
+        summary = await _upsert_ops(taxpayer_id, ops)
+        summary["format"] = "bank_pdf_kaspi"
+        logger.info("Kaspi PDF в income_ledger %s: %s", taxpayer_id, summary)
+        return summary
+    raise ValueError("PDF не распознан как выписка Kaspi Bank "
+                     "(другие банки/сканы — через OCR-путь, пока не подключён)")
 
 
 async def ingest_esf(taxpayer_id, xml: str) -> dict:
