@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # База знаний (глоссарий + НК + КНП) — путь монтируется в контейнер
     kb_docs_path: str = "/app/docs/knowledge"
 
+    # КГД портал — справочные REST-сервисы (X-Portal-Token оператора, Тир-1)
+    kgd_portal_base: str = "https://portal.kgd.gov.kz/services/isnaportalsync/public"
+    kgd_portal_token: str = ""
+
     app_secret_key: str = ""
     env: str = "dev"
 
