@@ -11,6 +11,7 @@ from ..tax.penalty import calc_penalty
 from ..tax.service import compute_declaration_910
 from ..tax.xml_service import generate_910_xml
 from ..tax.xml_200_service import generate_200_xml
+from ..tax.xml_our_service import generate_300_xml, generate_100_xml
 from ..tax.vat_service import compute_vat_300
 from ..tax.payroll_service import compute_200
 from ..tax.kpn_service import compute_kpn_100
@@ -79,6 +80,32 @@ async def calculate_300(taxpayer_id: UUID, year: int = Query(..., ge=2026, le=20
         return await compute_vat_300(taxpayer_id, year, quarter)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.post("/300/{declaration_id}/xml")
+async def build_300_xml_endpoint(declaration_id: UUID):
+    """Собирает XML 300.00 (НДС) + локальный ФЛК, сохраняет в декларацию."""
+    try:
+        result = await generate_300_xml(declaration_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    if not result.get("ok"):
+        raise HTTPException(422, detail={"flk_errors": result["flk_errors"],
+                                         "flk_warnings": result["flk_warnings"]})
+    return result
+
+
+@router.post("/100/{declaration_id}/xml")
+async def build_100_xml_endpoint(declaration_id: UUID):
+    """Собирает XML 100.00 (КПН) + локальный ФЛК, сохраняет в декларацию."""
+    try:
+        result = await generate_100_xml(declaration_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    if not result.get("ok"):
+        raise HTTPException(422, detail={"flk_errors": result["flk_errors"],
+                                         "flk_warnings": result["flk_warnings"]})
+    return result
 
 
 @router.post("/200/calculate")
