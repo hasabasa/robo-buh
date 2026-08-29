@@ -30,6 +30,7 @@ services:
     env_file: ../.env
     environment:
       - BACKEND_URL=http://backend:8000
+      - PUBLIC_BACKEND_URL=http://localhost:8000
     volumes:
       - ../streamlit_app:/app:rw
     depends_on:

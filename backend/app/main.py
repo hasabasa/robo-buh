@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .core.database import close_pool, get_pool
 from .core.init_db import init_db
@@ -27,6 +28,12 @@ app = FastAPI(
     title="robo-buh",
     description="Робот-бухгалтер: упрощёнка РК, формы 910.00 и 200.00",
     lifespan=lifespan,
+)
+
+# CORS: браузерный компонент подписи (Streamlit-iframe) шлёт подписанный XML на бэкенд.
+# Прототип — разрешаем всё; в проде сузить до домена кабинета.
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
 app.include_router(health.router, tags=["service"])

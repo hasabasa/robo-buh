@@ -8,7 +8,8 @@ import httpx
 import streamlit as st
 
 _ASSETS = Path(__file__).parent / "assets"
-API_BASE = os.environ.get("BACKEND_URL", "http://backend:8000")
+API_BASE = os.environ.get("BACKEND_URL", "http://backend:8000")          # server-side (Streamlit→backend)
+PUBLIC_API = os.environ.get("PUBLIC_BACKEND_URL", "http://localhost:8000")  # browser-reachable (JS→backend)
 
 
 def load_css() -> None:
@@ -24,6 +25,29 @@ def api_get(path: str, **params):
         if r.status_code == 200:
             return r.json(), None
         return None, f"{r.status_code}: {r.text[:160]}"
+    except Exception as e:  # noqa: BLE001
+        return None, str(e)
+
+
+def api_post(path: str, *, json=None, params=None):
+    """POST к backend. Возвращает (data, error)."""
+    try:
+        r = httpx.post(f"{API_BASE}{path}", json=json, params=params, timeout=60.0)
+        if r.status_code < 300:
+            return (r.json() if r.text else {}), None
+        return None, f"{r.status_code}: {r.text[:200]}"
+    except Exception as e:  # noqa: BLE001
+        return None, str(e)
+
+
+def api_upload(path: str, filename: str, content: bytes, taxpayer_id: str):
+    """Загрузка файла (multipart) на backend."""
+    try:
+        r = httpx.post(f"{API_BASE}{path}", data={"taxpayer_id": taxpayer_id},
+                       files={"file": (filename, content)}, timeout=120.0)
+        if r.status_code < 300:
+            return r.json(), None
+        return None, f"{r.status_code}: {r.text[:200]}"
     except Exception as e:  # noqa: BLE001
         return None, str(e)
 
@@ -130,6 +154,61 @@ def metric_card(label: str, value: str, sub: str = "", tone: str = "brand") -> N
         """,
         unsafe_allow_html=True,
     )
+
+
+def ncalayer_sign(declaration_id: str, xml: str, height: int = 220) -> None:
+    """Браузерный компонент подписи декларации ЭЦП через NCALayer.
+
+    Подпись выполняется В БРАУЗЕРЕ клиента (NCALayer на 127.0.0.1:13579) — ключ и пароль
+    остаются у клиента. Подписанный XML JS шлёт на backend /api/declarations/{id}/sign,
+    где сервер верифицирует его через NCANode и фиксирует.
+    """
+    import json as _json
+    import streamlit.components.v1 as components
+
+    payload = _json.dumps(xml)  # безопасно вставляем XML как JS-строку
+    html = """
+<div style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
+  <button id="signBtn" style="background:linear-gradient(135deg,#2946C4,#4F46E5);color:#fff;
+    border:none;border-radius:11px;padding:.7rem 1.3rem;font-weight:700;font-size:.95rem;cursor:pointer">
+    🔏 Подписать ЭЦП через NCALayer</button>
+  <div id="st" style="margin-top:.8rem;font-size:.9rem;color:#5A6478;line-height:1.5"></div>
+</div>
+<script>
+const XML = __XML__;
+const DECL = "__DECL__";
+const API = "__API__";
+const st = document.getElementById("st");
+const say = (m,c) => { st.innerHTML = m; st.style.color = c||"#5A6478"; };
+document.getElementById("signBtn").onclick = () => {
+  say("Открываю NCALayer… подтвердите ключ и пароль в окне NCALayer.");
+  let ws;
+  try { ws = new WebSocket("wss://127.0.0.1:13579"); }
+  catch(e){ say("NCALayer не запущен (порт 13579). Запустите NCALayer и повторите.","#E02424"); return; }
+  ws.onerror = () => say("Не удалось соединиться с NCALayer. Запущен ли он?","#E02424");
+  ws.onopen = () => ws.send(JSON.stringify({
+    module:"kz.gov.pki.knca.commonUtils", method:"signXml",
+    args:["PKCS12","SIGNATURE",XML,"",""]
+  }));
+  ws.onmessage = (ev) => {
+    let r; try { r = JSON.parse(ev.data); } catch(e){ return; }
+    if (r.code === undefined) return;
+    ws.close();
+    if (String(r.code) !== "200"){ say("NCALayer: "+(r.message||r.code),"#E02424"); return; }
+    say("Подписано. Отправляю на проверку…");
+    fetch(API+"/api/declarations/"+DECL+"/sign", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({signed_xml: r.responseObject})
+    }).then(x => x.json().then(j => ({ok:x.ok, j})))
+      .then(({ok,j}) => ok
+        ? say("✅ Подпись принята и проверена. Статус декларации: "+(j.status||"signed"),"#0E9F6E")
+        : say("Отклонено при проверке: "+(j.detail||JSON.stringify(j)),"#E02424"))
+      .catch(e => say("Ошибка отправки на backend: "+e,"#E02424"));
+  };
+};
+</script>
+""".replace("__XML__", payload).replace("__DECL__", declaration_id).replace("__API__", PUBLIC_API)
+    components.html(html, height=height)
 
 
 def snr_traffic_light(snr: dict) -> None:

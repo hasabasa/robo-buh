@@ -6,8 +6,8 @@
 
 import streamlit as st
 
-from ui import (all_clear, api_get, badge, hero, issue_card, load_css, metric_card,
-                money, snr_traffic_light, tax_row)
+from ui import (all_clear, api_get, api_post, api_upload, badge, hero, issue_card,
+                load_css, metric_card, money, ncalayer_sign, snr_traffic_light, tax_row)
 
 st.set_page_config(page_title="robo-buh — робот-бухгалтер", page_icon="🧾",
                    layout="wide", initial_sidebar_state="expanded")
@@ -111,25 +111,56 @@ elif page == "Доходы":
         rq = (data or {}).get("counts", {}).get("review_queue", 0)
     else:
         rq = 0
-    tabs = st.tabs(["Загрузка", f"Сверка ({rq})", "Книга операций"])
-    with tabs[0]:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Банковская выписка")
-            st.file_uploader("MT940 · 1CClientBankExchange · CSV/XLSX · PDF · ЭСФ (XML)",
-                             type=["sta", "txt", "csv", "xlsx", "pdf", "xml"],
-                             accept_multiple_files=True)
-            st.caption("Формат определяется автоматически. PDF распознаёт ИИ с проверкой сумм.")
-        with c2:
-            st.subheader("Автоматические источники")
-            st.markdown(f"- Kaspi Shop API — {badge('подключено', 'ok')}\n"
-                        f"- ЭСФ (esf.gov.kz) — {badge('коннектор готов', 'brand')}\n"
-                        f"- Webkassa (ОФД) — {badge('не подключено', 'warn')}",
-                        unsafe_allow_html=True)
-    with tabs[1]:
-        st.info("Очередь ручной сверки операций (is_income не определён). Подключение — API income.")
-    with tabs[2]:
-        st.info("Единая книга операций с фильтрами по источнику и периоду.")
+    if not selected:
+        st.info("Выберите налогоплательщика в сайдбаре.")
+    else:
+        tid = selected["id"]
+        tabs = st.tabs(["Загрузка", f"Сверка ({rq})", "Книга операций"])
+        with tabs[0]:
+            up = st.file_uploader(
+                "Выписка (MT940 · 1CClientBankExchange · PDF Kaspi) или ЭСФ (XML)",
+                type=["sta", "txt", "csv", "pdf", "xml"], accept_multiple_files=True)
+            if up and st.button("Загрузить", type="primary"):
+                for f in up:
+                    is_esf = f.name.lower().endswith(".xml")
+                    path = "/api/income/esf/upload" if is_esf else "/api/income/upload"
+                    res, err = api_upload(path, f.name, f.getvalue(), tid)
+                    if err:
+                        st.error(f"{f.name}: {err}")
+                    else:
+                        st.success(f"{f.name}: загружено {res.get('imported', 0)} · "
+                                   f"доход {res.get('income', 0)} · расход {res.get('non_income', 0)} · "
+                                   f"на сверку {res.get('review', 0)}")
+            st.caption("Формат определяется автоматически. Разбор локальный — данные наружу не уходят.")
+        with tabs[1]:
+            queue, _ = api_get("/api/income/review-queue", taxpayer_id=tid)
+            if not queue:
+                all_clear("Очередь сверки пуста — все операции классифицированы")
+            else:
+                st.caption("Классификатор не уверен — подтвердите вручную:")
+                for op in queue:
+                    c1, c2, c3 = st.columns([5, 1, 1])
+                    with c1:
+                        st.markdown(f"**{money(op['amount'])}** · {op.get('op_date','')} · "
+                                    f"КНП {op.get('knp') or '—'} · {(op.get('purpose_text') or '')[:60]}")
+                    if c2.button("Доход", key=f"inc{op['id']}"):
+                        api_post(f"/api/income/review/{op['id']}", json={"is_income": True})
+                        st.rerun()
+                    if c3.button("Не доход", key=f"exp{op['id']}"):
+                        api_post(f"/api/income/review/{op['id']}", json={"is_income": False})
+                        st.rerun()
+        with tabs[2]:
+            led, _ = api_get("/api/income/ledger", taxpayer_id=tid, limit=200)
+            if led:
+                import pandas as pd
+                df = pd.DataFrame(led)
+                df["доход"] = df["is_income"].map({True: "✅", False: "—", None: "❓"})
+                df = df[["op_date", "payment_channel", "amount", "knp", "counterparty_name",
+                         "purpose_text", "доход", "source"]]
+                df.columns = ["Дата", "Напр.", "Сумма", "КНП", "Контрагент", "Назначение", "Доход", "Источник"]
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Операций пока нет — загрузите выписку.")
 
 elif page == "Налоги и календарь":
     st.title("Налоги и календарь")
@@ -143,8 +174,45 @@ elif page == "Налоги и календарь":
 
 elif page == "Декларации":
     st.title("Декларации")
-    st.info("Список деклараций (draft→signed→submitted) и подписание ЭЦП через NCALayer — "
-            "ключ остаётся на вашем компьютере. Экран подключается к API деклараций.")
+    st.caption("Расчёт → XML → подпись ВАШЕЙ ЭЦП через NCALayer (ключ остаётся у вас)")
+    _XML_EP = {"910.00": "910", "200.00": "200", "300.00": "300", "100.00": "100"}
+    _ST_TONE = {"draft": "brand", "signed": "ok", "submitted": "ok", "accepted": "ok"}
+    if not selected:
+        st.info("Выберите налогоплательщика.")
+    else:
+        tid = selected["id"]
+        decls, err = api_get("/api/declarations", taxpayer_id=tid)
+        if err:
+            st.error(err)
+        elif not decls:
+            st.info("Деклараций пока нет. Рассчитайте их на вкладке «Налоги» или в API "
+                    "(/api/tax/{форма}/calculate) — они появятся здесь.")
+        else:
+            for d in decls:
+                code, did = d["form_code"], d["id"]
+                with st.container(border=True):
+                    top = st.columns([3, 1])
+                    top[0].markdown(f"### {code} · {d['period_year']} (период {d['period_no']})")
+                    top[1].markdown(badge(d["status"], _ST_TONE.get(d["status"], "warn")),
+                                    unsafe_allow_html=True)
+                    if not d["has_xml"]:
+                        if st.button(f"Собрать XML {code}", key=f"xml{did}", type="primary"):
+                            res, e2 = api_post(f"/api/tax/{_XML_EP[code]}/{did}/xml")
+                            if e2:
+                                st.error(f"ФЛК/ошибка: {e2}")
+                            else:
+                                st.rerun()
+                    else:
+                        xmld, _ = api_get(f"/api/declarations/{did}/xml")
+                        xml_text = (xmld or {}).get("xml", "")
+                        with st.expander("Посмотреть XML"):
+                            st.code(xml_text[:4000], language="xml")
+                        st.download_button("Скачать XML", xml_text, file_name=f"{code}_{d['period_year']}.xml",
+                                           key=f"dl{did}")
+                        if d["status"] in ("signed", "submitted", "accepted"):
+                            st.success(f"Подписано ✓ (статус {d['status']})")
+                        else:
+                            ncalayer_sign(did, xml_text)
 
 elif page == "Долги и пени":
     st.title("Долги и пени")
