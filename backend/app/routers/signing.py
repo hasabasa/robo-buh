@@ -17,6 +17,21 @@ class SubmitSignatureRequest(BaseModel):
     signed_xml: str = Field(..., description="XML декларации, подписанный ЭЦП клиента через NCALayer (basicsSignXML)")
 
 
+@router.get("")
+async def list_declarations(taxpayer_id: UUID):
+    """Список деклараций налогоплательщика: форма, период, статус, есть ли XML/подпись."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, form_code, period_year, period_no, status,
+                   (xml IS NOT NULL) AS has_xml, calc, updated_at
+            FROM declarations WHERE taxpayer_id=$1
+            ORDER BY period_year DESC, form_code, period_no DESC
+            """, taxpayer_id)
+    return [dict(r) for r in rows]
+
+
 @router.get("/{declaration_id}/xml")
 async def get_declaration_xml(declaration_id: UUID):
     """Отдаёт несформированный/сформированный XML декларации, который клиент подпишет локально."""
