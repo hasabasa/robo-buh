@@ -115,7 +115,12 @@ def profile_strip(p: dict) -> None:
     if p.get("is_nds_payer") is not None:
         fields.append(field("НДС", "плательщик" if p["is_nds_payer"] else "не плательщик",
                             "warn" if p["is_nds_payer"] else "ok"))
-    fields.append(field("Режим", reg))
+    # режим: приоритет — из КГД (snr-search), иначе заведённый
+    if p.get("snr_type_name"):
+        since = f" с {_ru_date(p['snr_begin_date'])}" if p.get("snr_begin_date") else ""
+        fields.append(field("Режим (КГД)", p["snr_type_name"] + since))
+    else:
+        fields.append(field("Режим", reg))
     if p.get("ugd_code"):
         fields.append(field("УГД", p["ugd_code"]))
     src = "из КГД" if p.get("synced_at") else "не синхронизирован с КГД"

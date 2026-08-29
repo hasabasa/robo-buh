@@ -143,8 +143,12 @@ async def build_dashboard(taxpayer_id: UUID, today: date | None = None) -> dict:
                        "text": snr.get("message", "Приближение к лимиту упрощёнки.")})
     if debt_total > 0:
         arrest = debt and debt["has_bank_arrest"]
-        issues.append({"tone": "danger", "title": f"Задолженность по КГД",
+        issues.append({"tone": "danger", "title": "Задолженность по КГД",
                        "text": ("Есть арест счёта. " if arrest else "") + "Пеня растёт ежедневно."})
+    elif debt is None:
+        issues.append({"tone": "warn", "title": "Долги/пени не проверены",
+                       "text": "Задолженность по ИПН/ОСМС/соцотчислениям требует входа по ЭЦП в "
+                               "кабинет КГД (токен ЛС). Пока не подключено — показать не можем."})
 
     # --- профиль из КГД (карточка, если синхронизирована) ---
     req = tp["requisites"]
@@ -161,9 +165,23 @@ async def build_dashboard(taxpayer_id: UUID, today: date | None = None) -> dict:
         "active": card.get("active"),
         "is_nds_payer": card.get("is_nds_payer"),
         "kgd_name": card.get("name"),
+        "snr_type": card.get("snr_type"),
+        "snr_type_name": card.get("snr_type_name"),
+        "snr_begin_date": card.get("snr_begin_date"),
         "synced_at": card.get("synced_at"),
         "warnings": card.get("warnings") or [],
     }
+    # расхождение режима: что заведено у нас vs что говорит КГД
+    _SNR_TO_REGIME = {"SNR_SIMPLIFIED_DECLARATION": "snr_simplified", "SNR_GENERAL_ORDER": "our"}
+    kgd_regime = _SNR_TO_REGIME.get(card.get("snr_type"))
+    if kgd_regime and kgd_regime != tp["tax_regime"]:
+        issues.append({
+            "tone": "danger", "title": "Режим по КГД отличается от заведённого",
+            "text": f"В системе — {tp['tax_regime']}, а по КГД: «{card.get('snr_type_name')}» "
+                    f"с {card.get('snr_begin_date')}. Налоги считаются не по тому режиму — исправьте профиль."})
+    if not card.get("synced_at"):
+        issues.append({"tone": "warn", "title": "Профиль не сверен с КГД",
+                       "text": "Нажмите «↻ КГД», чтобы подтянуть режим, статус и НДС из реестра."})
 
     return {
         "taxpayer": {"id": str(tp["id"]), "name": tp["name"], "kind": tp["kind"],
@@ -173,7 +191,9 @@ async def build_dashboard(taxpayer_id: UUID, today: date | None = None) -> dict:
         "total_due": str(total_due),
         "taxes": [{**t, "amount": str(t["amount"])} for t in taxes],
         "debt": {"total": str(debt_total), "penalty": str(penalty),
-                 "has_arrest": bool(debt and debt["has_bank_arrest"])},
+                 "has_arrest": bool(debt and debt["has_bank_arrest"]),
+                 "status": "ok" if debt is not None else "not_connected",
+                 "note": None if debt is not None else "Требует токен ЛС (вход по ЭЦП в кабинет КГД)"},
         "snr": snr,
         "issues": issues,
         "counts": {"review_queue": review_queue, "employees": n_employees, "ops_ytd": ops_this_year},

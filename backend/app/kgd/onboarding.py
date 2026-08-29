@@ -57,6 +57,14 @@ async def sync_taxpayer_card(taxpayer_id: UUID) -> dict:
     card = await validate_taxpayer(tp["iin_bin"], tp["kind"])
     if not card.get("ok"):
         return card
+    # режим НП по КГД (snr-search) — источник истины, может расходиться с заведённым
+    try:
+        snr = await KgdPortalClient().snr(tp["iin_bin"])
+        card["snr_type"] = snr.get("type")
+        card["snr_type_name"] = snr.get("type_name")
+        card["snr_begin_date"] = snr.get("begin_date")
+    except Exception:  # noqa: BLE001
+        pass
     card["synced_at"] = datetime.now(timezone.utc).isoformat()
 
     async with pool.acquire() as conn:

@@ -85,6 +85,34 @@ class KgdPortalClient:
             raw=data,
         )
 
+    async def snr(self, code: str) -> dict:
+        """Режим налогообложения НП (snr-search). Возвращает активный режим + дату начала."""
+        data = await self._get("/snr-search/search", {"uin": code})
+        stm = data.get("stmList") or []
+        active = next((s for s in stm if not s.get("endDate")), stm[0] if stm else {})
+        return {
+            "found": data.get("status") == "SUCCESS",
+            "type": active.get("type"),                 # SNR_GENERAL_ORDER | SNR_SIMPLIFIED_DECLARATION | …
+            "type_name": active.get("typeNameRu"),
+            "begin_date": active.get("beginDate"),
+            "name": (data.get("tpName") or {}).get("nameRu"),
+            "all": stm,
+        }
+
+    async def tax_debt(self, code: str, personal_token: str) -> dict:
+        """Налоговая задолженность (tax-debt-info). Нужен personalAccountToken (кабинет ЛС)."""
+        headers = self._headers()
+        headers["personalAccountToken"] = personal_token
+        async with httpx.AsyncClient(timeout=self.timeout) as c:
+            r = await c.get(f"{self.base}/tax-debt-info",
+                            params={"taxpayerCode": code}, headers=headers)
+        if r.status_code >= 500:
+            raise KgdPortalError(f"tax-debt-info: {r.text[:160]}")
+        try:
+            return r.json()
+        except ValueError:
+            return {}
+
     async def is_nds_payer(self, code: str) -> bool | None:
         """Стоит ли на учёте по НДС (search-payer-data). None если ответ пустой/неясный."""
         data = await self._get("/search-payer-data", {"taxpayerCode": code})
