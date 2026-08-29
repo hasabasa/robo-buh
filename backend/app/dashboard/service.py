@@ -47,7 +47,8 @@ async def build_dashboard(taxpayer_id: UUID, today: date | None = None) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         tp = await conn.fetchrow(
-            "SELECT id, kind, name, tax_regime, iin_bin FROM taxpayers WHERE id=$1", taxpayer_id)
+            "SELECT id, kind, name, tax_regime, iin_bin, birth_date, oked, ugd_code, requisites "
+            "FROM taxpayers WHERE id=$1", taxpayer_id)
         if not tp:
             raise ValueError("Налогоплательщик не найден")
         n_employees = await conn.fetchval(
@@ -145,9 +146,29 @@ async def build_dashboard(taxpayer_id: UUID, today: date | None = None) -> dict:
         issues.append({"tone": "danger", "title": f"Задолженность по КГД",
                        "text": ("Есть арест счёта. " if arrest else "") + "Пеня растёт ежедневно."})
 
+    # --- профиль из КГД (карточка, если синхронизирована) ---
+    req = tp["requisites"]
+    if isinstance(req, str):
+        import json as _json
+        req = _json.loads(req) if req else {}
+    card = (req or {}).get("kgd_card") or {}
+    profile = {
+        "iin_bin": tp["iin_bin"], "kind": tp["kind"], "regime": tp["tax_regime"],
+        "ugd_code": tp["ugd_code"], "ugd_name": card.get("ugd_name"),
+        "oked": tp["oked"],
+        "birth_date": tp["birth_date"].isoformat() if tp["birth_date"] else None,
+        "begin_date": card.get("begin_date"),
+        "active": card.get("active"),
+        "is_nds_payer": card.get("is_nds_payer"),
+        "kgd_name": card.get("name"),
+        "synced_at": card.get("synced_at"),
+        "warnings": card.get("warnings") or [],
+    }
+
     return {
         "taxpayer": {"id": str(tp["id"]), "name": tp["name"], "kind": tp["kind"],
                      "regime": tp["tax_regime"], "iin_bin": tp["iin_bin"]},
+        "profile": profile,
         "as_of": today.isoformat(),
         "total_due": str(total_due),
         "taxes": [{**t, "amount": str(t["amount"])} for t in taxes],

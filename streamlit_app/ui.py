@@ -101,6 +101,28 @@ def hero(taxpayer: dict, total_due, as_of: str, pills: list[str]) -> None:
     )
 
 
+def profile_strip(p: dict) -> None:
+    """Карточка налогоплательщика из КГД: ИИН, регистрация, статус, НДС, режим."""
+    def field(k, v, tone=""):
+        return f'<div class="rb-field"><div class="k">{k}</div><div class="v {tone}">{v}</div></div>'
+    reg = _REGIME.get(p.get("regime"), p.get("regime", ""))
+    fields = [field("ИИН/БИН", p.get("iin_bin", "—"))]
+    if p.get("begin_date"):
+        fields.append(field("Зарегистрирован", _ru_date(p["begin_date"])))
+    if p.get("active") is not None:
+        fields.append(field("Статус", "действующий" if p["active"] else "снят с учёта",
+                            "ok" if p["active"] else "danger"))
+    if p.get("is_nds_payer") is not None:
+        fields.append(field("НДС", "плательщик" if p["is_nds_payer"] else "не плательщик",
+                            "warn" if p["is_nds_payer"] else "ok"))
+    fields.append(field("Режим", reg))
+    if p.get("ugd_code"):
+        fields.append(field("УГД", p["ugd_code"]))
+    src = "из КГД" if p.get("synced_at") else "не синхронизирован с КГД"
+    fields.append(field("Источник", src, "ok" if p.get("synced_at") else "warn"))
+    st.markdown(f'<div class="rb-profile">{"".join(fields)}</div>', unsafe_allow_html=True)
+
+
 def tax_row(t: dict) -> None:
     """Строка одного налога: код, название, период, сумма, срок."""
     tone = t.get("tone", "brand")

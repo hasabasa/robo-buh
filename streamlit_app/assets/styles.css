@@ -73,6 +73,21 @@ h1 { font-weight: 800 !important; }
 }
 .rb-hero .hpill b { font-variant-numeric: tabular-nums; }
 
+/* ============ Профиль (карточка КГД) ============ */
+.rb-profile {
+  display:flex; flex-wrap:wrap; gap:.55rem; margin:-.4rem 0 .2rem;
+}
+.rb-field {
+  background:var(--rb-card); border:1px solid var(--rb-line); border-radius:11px;
+  padding:.5rem .8rem; box-shadow:var(--rb-shadow); min-width:120px;
+}
+.rb-field .k { font-size:.68rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--rb-ink-faint); }
+.rb-field .v { font-size:.98rem; font-weight:700; color:var(--rb-ink); margin-top:.12rem;
+  font-variant-numeric:tabular-nums; }
+.rb-field .v.ok{color:var(--rb-ok)} .rb-field .v.warn{color:var(--rb-warn)}
+.rb-field .v.danger{color:var(--rb-danger)}
+
 /* ============ Секции ============ */
 .rb-section-title {
   font-size:.82rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;

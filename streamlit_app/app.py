@@ -7,7 +7,8 @@
 import streamlit as st
 
 from ui import (all_clear, api_get, api_post, api_upload, badge, hero, issue_card,
-                load_css, metric_card, money, ncalayer_sign, snr_traffic_light, tax_row)
+                load_css, metric_card, money, ncalayer_sign, profile_strip,
+                snr_traffic_light, tax_row)
 
 st.set_page_config(page_title="robo-buh — робот-бухгалтер", page_icon="🧾",
                    layout="wide", initial_sidebar_state="expanded")
@@ -66,6 +67,17 @@ if page == "Обзор":
                 pills.append("🟢 просрочек нет")
 
             hero(data["taxpayer"], data["total_due"], data["as_of"], pills)
+            st.write("")
+
+            # профиль из КГД + кнопка синхронизации
+            if data.get("profile"):
+                pcols = st.columns([6, 1])
+                with pcols[0]:
+                    profile_strip(data["profile"])
+                with pcols[1]:
+                    if st.button("↻ КГД", help="Обновить карточку из реестра КГД"):
+                        _, e = api_post(f"/api/kgd/sync/{selected['id']}")
+                        st.rerun() if not e else st.error(e)
             st.write("")
 
             col_main, col_side = st.columns([3, 2], gap="large")

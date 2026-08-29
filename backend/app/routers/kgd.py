@@ -1,11 +1,24 @@
 """Роутер справок КГД: валидация налогоплательщика/контрагента."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Query
 
-from ..kgd.onboarding import validate_taxpayer
+from ..kgd.onboarding import sync_taxpayer_card, validate_taxpayer
 from ..kgd.portal_client import KgdPortalClient, KgdPortalError
 
 router = APIRouter()
+
+
+@router.post("/sync/{taxpayer_id}")
+async def sync(taxpayer_id: UUID):
+    """Тянет карточку из КГД по ИИН/БИН и сохраняет в профиль налогоплательщика."""
+    try:
+        return await sync_taxpayer_card(taxpayer_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except KgdPortalError as e:
+        raise HTTPException(503, str(e))
 
 
 @router.get("/validate")
