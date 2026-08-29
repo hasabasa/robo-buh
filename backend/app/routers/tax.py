@@ -10,6 +10,7 @@ from decimal import Decimal
 from ..tax.penalty import calc_penalty
 from ..tax.service import compute_declaration_910
 from ..tax.xml_service import generate_910_xml
+from ..tax.xml_200_service import generate_200_xml
 from ..tax.vat_service import compute_vat_300
 from ..tax.payroll_service import compute_200
 from ..tax.kpn_service import compute_kpn_100
@@ -54,6 +55,19 @@ async def build_910_xml_endpoint(declaration_id: UUID):
         raise HTTPException(404, str(e))
     if not result.get("ok"):
         raise HTTPException(422, detail={"flk_errors": result["flk_errors"], "flk_warnings": result["flk_warnings"]})
+    return result
+
+
+@router.post("/200/{declaration_id}/xml")
+async def build_200_xml_endpoint(declaration_id: UUID):
+    """Собирает XML 200.00 по своду + локальный ФЛК, сохраняет в декларацию."""
+    try:
+        result = await generate_200_xml(declaration_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    if not result.get("ok"):
+        raise HTTPException(422, detail={"flk_errors": result["flk_errors"],
+                                         "flk_warnings": result["flk_warnings"]})
     return result
 
 
